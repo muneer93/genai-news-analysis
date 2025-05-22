@@ -1,0 +1,14 @@
+<h1>📺 Channel Dashboard</h1>
+
+<ul>
+  {% for channel in channels %}
+    <li>
+      <a href="{% url 'channel_detail' channel.channel_name %}">
+        {{ channel.channel_name }}
+      </a>
+    </li>
+  {% endfor %}
+</ul>
+
+<hr>
+<a href="http://localhost:8501/" target="_blank">🎬 Analyze a Video (Streamlit)</a>

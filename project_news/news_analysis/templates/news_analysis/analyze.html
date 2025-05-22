@@ -1,0 +1,12 @@
+<!-- news_analysis/templates/news_analysis/analyze.html -->
+<form method="post">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit">Analyze</button>
+</form>
+
+{% if analysis %}
+  <h2>Analysis for {{ url }}</h2>
+  <p><strong>Title:</strong> {{ analysis.title }}</p>
+  <p><strong>Bias:</strong> {{ analysis.bias }}</p>
+{% endif %}

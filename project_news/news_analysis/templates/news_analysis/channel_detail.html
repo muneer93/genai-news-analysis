@@ -1,0 +1,21 @@
+<h2>{{ channel_name }} — Channel Summary</h2>
+
+<h3>📊 Bias Scores</h3>
+<ul>
+  <li>Left: {{ bias_scores.left_avg|floatformat:2 }}</li>
+  <li>Center: {{ bias_scores.center_avg|floatformat:2 }}</li>
+  <li>Right: {{ bias_scores.right_avg|floatformat:2 }}</li>
+  <li>Biased: {{ bias_scores.biased_avg|floatformat:2 }}</li>
+  <li>Neutral: {{ bias_scores.neutral_avg|floatformat:2 }}</li>
+</ul>
+
+<h3>🎥 Recent Videos</h3>
+<ul>
+  {% for video in videos %}
+    <li>{{ video.video_title }} — {{ video.published_at }}</li>
+  {% endfor %}
+</ul>
+
+<hr>
+<a href="/">⬅ Back to Dashboard</a>
+<a href="http://localhost:8501/" target="_blank">🎬 Analyze a Video</a>
