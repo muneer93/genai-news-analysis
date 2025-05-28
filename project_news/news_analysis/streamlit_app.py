@@ -2,12 +2,12 @@ import os
 import sys
 import django
 import streamlit as st
-from transformers import AutoTokenizer, pipeline
+from transformers import pipeline, AutoTokenizer
 from urllib.parse import urlparse, parse_qs
 import plotly.graph_objects as go
 from dotenv import load_dotenv
-import torch
-torch.device("cpu")
+import requests
+import json
 
 load_dotenv()
 
@@ -27,16 +27,35 @@ from django.utils.dateparse import parse_datetime
 from utils.youtube_utils import fetch_video_data
 from utils.sentiment_utils import analyze_sentiment
 from utils.bias_utils import analyze_bias
-from news_analysis.hf_reasoning import query_flant5
 
-# Hugging Face tools
-sentiment_pipeline = pipeline("sentiment-analysis")
-tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+model_name = "meta-llama/Llama-3.3-70B-Instruct"
 
-YOUTUBE_API_KEYS = os.getenv("YOUTUBE_API_KEYS")
+def analyze_sentiment_with_llama(text):
+    headers = {
+        "Authorization": f"Bearer {HF_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "inputs": f"Sentiment analysis: {text}",
+        "parameters": {
+            "max_length": 50
+        }
+    }
+
+    response = requests.post(
+        f"https://api-inference.huggingface.co/models/{model_name}",
+        headers=headers,
+        json=payload
+    )
+
+    if response.status_code == 200:
+        output = response.json()[0]['generated_text']
+        return {"label": output.strip()}
+    else:
+        return {"error": f"Failed to analyze sentiment: {response.status_code}"}
 
 def extract_video_id(url):
-    """Extracts YouTube video ID from URL."""
     parsed_url = urlparse(url)
     if parsed_url.hostname == 'youtu.be':
         return parsed_url.path[1:]
@@ -49,25 +68,21 @@ def extract_video_id(url):
             return parsed_url.path.split('/')[2]
     return None
 
-def plot_bias_gauge(bias_left, bias_center, bias_right):
-    bias_left_percent = bias_left * 100
-    bias_center_percent = bias_center * 100
-    bias_right_percent = bias_right * 100
-
-    bias_score = bias_right_percent - bias_left_percent  # -100 (Left) to +100 (Right)
-
+def plot_bias_gauge(bias_score):
     fig = go.Figure(go.Indicator(
-        mode="gauge+number",
+        mode="gauge+delta",
         value=bias_score,
-        domain={'x': [0, 1], 'y': [0, 1]},
-        title={'text': "Bias Balance"},
+        title={'text': "Bias Balance", 'font': {'size': 40}},
+        delta={'reference': 0, 'increasing': {'color': "RebeccaPurple"}, 'font': {'size': 50}},
         gauge={
-            'axis': {'range': [-100, 100]},
-            'bar': {'color': "darkblue"},
+            'axis': {'range': [-100, 100], 'visible': True},
+            'bar': {'color': "rgba(0, 0, 0, 0)"},
+            'bgcolor': "rgba(0, 0, 0, 0)",
+            'borderwidth': 0,
             'steps': [
-                {'range': [-100, -30], 'color': 'red'},
-                {'range': [-30, 30], 'color': 'lightgray'},
-                {'range': [30, 100], 'color': 'green'}
+                {'range': [-100, -50], 'color': "#FF3737"},  # Red
+                {'range': [-50, 50], 'color': "#D3BD63"},  # Yellow
+                {'range': [50, 100], 'color': "#34C759"}  # Green
             ],
             'threshold': {
                 'line': {'color': "black", 'width': 4},
@@ -76,26 +91,22 @@ def plot_bias_gauge(bias_left, bias_center, bias_right):
             }
         }
     ))
+    fig.update_layout(
+        paper_bgcolor="rgba(0, 0, 0, 0)",
+        font={'color': "#4C59D4", 'family': "Arial"},
+        height=400
+    )
     return fig
 
 def generate_model_commentary(sentiment, bias):
     sentiment_label = sentiment.get("label", "").capitalize()
-    sentiment_score = sentiment.get("average_score", 0)
-
-    bias_left = round(bias.get("left", 0) * 100, 1)
-    bias_center = round(bias.get("center", 0) * 100, 1)
-    bias_right = round(bias.get("right", 0) * 100, 1)
-    bias_biased = round(bias.get("biased", 0) * 100, 1)
-    bias_neutral = round(bias.get("neutral", 0) * 100, 1)
-
     commentary = f"""
         **Model Interpretation:**
 
-        According to our model, the overall agenda being discussed in the video is presented with a **{sentiment_label.lower()} tone**, 
-        and the model predicts this with **{round(sentiment_score * 100, 1)}% confidence**.
+        According to our model, the overall agenda being discussed in the video is presented with a **{sentiment_label.lower()} tone**.
 
-        - The text leans **{bias_left}% left**, **{bias_center}% center**, and **{bias_right}% right** ideologically.
-        - It shows a **{bias_biased}% likelihood** of containing biased language versus a **{bias_neutral}% likelihood** of being neutral.
+        - The text leans **{round(bias["left"] * 100, 2)}% left**, **{round(bias["center"] * 100, 2)}% center**, and **{round(bias["right"] * 100, 2)}% right** ideologically.
+        - It shows a **{round(bias["biased"] * 100, 2)}% likelihood** of containing biased language versus a **{round(bias["neutral"] * 100, 2)}% likelihood** of being neutral.
 
         **Suggestions to Improve Neutrality:**
         - Incorporate perspectives from across the political spectrum.
@@ -109,7 +120,6 @@ def main():
     st.title(" YouTube Video Bias & Sentiment Analyzer")
 
     with st.sidebar:
-        st.write("## Navigation")
         analysis_type = st.selectbox("Select Analysis Type", ["Analyze Video", "Database Search"])
 
     if analysis_type == "Analyze Video":
@@ -143,7 +153,6 @@ def main():
                     st.write("## Sentiment Analysis")
                     sentiment = {
                         "label": existing_analysis.sentiment_label,
-                        "average_score": existing_analysis.sentiment_score,
                     }
                     st.write(sentiment)
 
@@ -158,32 +167,17 @@ def main():
                     "biased": existing_analysis.bias_biased,
                     "neutral": existing_analysis.bias_neutral,
                 }
-                st.write(bias)
+                st.write(f"**Left:** {round(bias['left'] * 100, 2)}%")
+                st.write(f"**Center:** {round(bias['center'] * 100, 2)}%")
+                st.write(f"**Right:** {round(bias['right'] * 100, 2)}%")
+                st.write(f"**Biased:** {round(bias['biased'] * 100, 2)}%")
+                st.write(f"**Neutral:** {round(bias['neutral'] * 100, 2)}%")
 
-                fig = plot_bias_gauge(bias['left'], bias['center'], bias['right'])
+                bias_score = round((bias['right'] - bias['left']) * 100, 2)
+                fig = plot_bias_gauge(bias_score)
                 st.plotly_chart(fig)
 
                 with st.expander(" Model Interpretation & Suggestions"):
-                    flan_prompt = f"""
-                    The following is a transcript extracted from a YouTube news video.
-                    Analyze it and answer the following questions to help determine its tone and bias:
-                    1. Is this a news report or an interview?
-                    2. If it is an interview, does the interviewer ask neutral, unbiased questions or do they appear to lead the interviewee?
-                    3. If it is a news report, does the reporting appear biased or neutral?
-                    4. What is the main agenda or key takeaway of this content?
-                    5. Does the content present facts accurately and fairly?
-
-                    Transcript:
-                    {existing_analysis.caption_text[:3000]}
-                    """
-
-                    flan_response = query_flant5(flan_prompt)
-
-                    if "Error" in flan_response:
-                        st.warning("Model did not return a valid response. Try again later.")
-                    else:
-                        st.markdown(f"** FLAN-T5 Summary:**\n\n{flan_response}")
-
                     commentary = generate_model_commentary(sentiment, bias)
                     st.markdown(commentary)
 
@@ -212,7 +206,7 @@ def main():
                 with col2:
                     if transcript:
                         st.write("## Sentiment Analysis")
-                        sentiment = analyze_sentiment(transcript, tokenizer)
+                        sentiment = analyze_sentiment_with_llama(transcript)
                         st.write(sentiment)
 
                 if transcript:
@@ -221,9 +215,14 @@ def main():
 
                     bias = analyze_bias(transcript)
                     st.write("## Bias Score")
-                    st.write(bias)
+                    st.write(f"**Left:** {round(bias['left'] * 100, 2)}%")
+                    st.write(f"**Center:** {round(bias['center'] * 100, 2)}%")
+                    st.write(f"**Right:** {round(bias['right'] * 100, 2)}%")
+                    st.write(f"**Biased:** {round(bias['biased'] * 100, 2)}%")
+                    st.write(f"**Neutral:** {round(bias['neutral'] * 100, 2)}%")
 
-                    fig = plot_bias_gauge(bias['left'], bias['center'], bias['right'])
+                    bias_score = round((bias['right'] - bias['left']) * 100, 2)
+                    fig = plot_bias_gauge(bias_score)
                     st.plotly_chart(fig)
 
                     with st.expander(" Model Interpretation & Suggestions"):
@@ -239,8 +238,7 @@ def main():
                             published_at=parse_datetime(metadata.get("published_at")),
                             view_count=metadata.get("view_count", 0),
                             caption_text=transcript,
-                            sentiment_label=sentiment["label"],
-                            sentiment_score=sentiment["average_score"],
+                            sentiment_label=sentiment.get("label", ""),
                             bias_left=bias["left"],
                             bias_center=bias["center"],
                             bias_right=bias["right"],

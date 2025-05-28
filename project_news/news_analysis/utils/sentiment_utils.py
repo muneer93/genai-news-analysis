@@ -1,51 +1,43 @@
-# sentiment_utils.py
-from transformers import pipeline, AutoTokenizer
-import torch
+import requests
+import json
+import os
+from dotenv import load_dotenv
 
-# Disable MPS explicitly
-if torch.backends.mps.is_available():
-    print("MPS is available but we are disabling it to avoid bugs.")
+load_dotenv()
 
-model_name = "distilbert-base-uncased-finetuned-sst-2-english"
+HUGGING_FACE_TOKEN = os.getenv('HUGGING_FACE_TOKEN')
+MODEL_NAME = "meta-llama/Llama-3.3-70B-Instruct"
 
-try:
-    # Load tokenizer and pipeline (on CPU)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    sentiment_pipeline = pipeline(
-        "sentiment-analysis",
-        model=model_name,
-        tokenizer=tokenizer,
-        device=-1  # -1 ensures CPU usage
-    )
-except Exception as e:
-    print(f"Error loading sentiment pipeline: {e}")
-
-MAX_TOKENS = 512  # max for DistilBERT
-
-def chunk_text_by_tokens(text, max_tokens=MAX_TOKENS):
-    inputs = tokenizer(text, return_tensors="pt", truncation=False)
-    input_ids = inputs["input_ids"][0]
-    chunks = []
-    for i in range(0, len(input_ids), max_tokens):
-        chunk_ids = input_ids[i:i+max_tokens]
-        chunk_text = tokenizer.decode(chunk_ids, skip_special_tokens=True)
-        chunks.append(chunk_text)
-    return chunks
-
-def analyze_sentiment(text, tokenizer=None):
-    try:
-        result = sentiment_pipeline(text)
-        if isinstance(result, list):
-            score = result[0]['score']
-            label = result[0]['label']
-        else:
-            score = result['score']
-            label = result['label']
-
-        return {
-            "label": label,
-            "average_score": score
+def analyze_sentiment(text):
+    headers = {
+        "Authorization": f"Bearer {HUGGING_FACE_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "inputs": text,
+        "parameters": {
+            "max_length": 50
         }
-    except Exception as e:
-        print(f"Error analyzing sentiment: {e}")
-        return None
+    }
+    response = requests.post(
+        f"https://api-inference.huggingface.co/models/{MODEL_NAME}",
+        headers=headers,
+        json=payload
+    )
+    if response.status_code == 200:
+        output = response.json()[0]['generated_text']
+        return output
+    else:
+        return f"Error: {response.status_code}"
+
+def get_sentiment_score(text):
+    # You might need to fine-tune this function to extract sentiment scores
+    # based on the model's output format
+    output = analyze_sentiment(text)
+    # Implement logic to extract sentiment score from output
+    return output
+
+if __name__ == "__main__":
+    text = "I love this product!"
+    sentiment_output = analyze_sentiment(text)
+    print(sentiment_output)

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 YOUTUBE_API_KEYS = os.getenv("YOUTUBE_API_KEYS")
+
 if not YOUTUBE_API_KEYS:
     raise ValueError("Missing YOUTUBE_API_KEYS in environment variables")
 
